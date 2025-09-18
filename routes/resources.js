@@ -178,19 +178,13 @@ router.get('/:id', async (req, res, next) => {
  * @returns {Object} 500 - Interner Serverfehler.
  */
 router.post('/', validateResource, async (req, res, next) => {
-  const newResourceData = req.body;
-
-  const newResource = {
-    id: uuidv4(),
-    ...newResourceData,
-    createdAt: new Date().toISOString()
-  };
-
   try {
-    const resources = await readData(RESOURCES_FILE);
-    resources.push(newResource);
-    await writeData(RESOURCES_FILE, resources);
-    res.status(201).json(newResource);
+    const newResource = {
+      ...req.body,
+      createdAt: new Date().toISOString()
+    };
+    const created_resource = await Resource.create(newResource);
+    res.status(201).json(toClient(created_resource.toObject()));
   } catch (error) {
     console.error('Fehler beim Erstellen einer Ressource:', error);
     next(error);
