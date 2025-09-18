@@ -128,21 +128,34 @@ router.get('/', async (req, res, next) => {
  */
 router.get('/:id', async (req, res, next) => {
   try {
-    const resourceId = req.params.id;
+    const _id = toObjectId(req.params.id);
 
-    const resources = await readData(RESOURCES_FILE);
-    const ratings   = await readData(RATINGS_FILE);
-    const feedback  = await readData(FEEDBACK_FILE);
+    const resource_doc = await Resource.findById(_id).lean();
 
-    const resource = resources.find(r => String(r.id) === String(resourceId));
-    if (!resource) {
-      res.status(404).json({ error: `Ressource mit ID ${resourceId} nicht gefunden.` });
+    if (!resource_doc) {
+      res.status(404).json({ error: `Ressource mit ID ${req.params.id} nicht gefunden.` });
       return;
     }
 
-    // Hier voll anreichern (averageRating + feedback)
-    const enriched = buildEnrichedResource(resource, ratings, feedback);
-    res.status(200).json(enriched);
+    const [avgDoc] = await Rating.aggregate([
+      { $match: { resourceId: _id } },
+      { $group: { _id: null, avg: { $avg: "ratingValue" } } }
+    ]);
+
+    const avgRating = avgDoc?. avg ?? 0;
+    
+    const feedback = await Feedback.find({ resourceId: _id }).lean();
+
+    const resource_obj = toClient(resource_doc);
+
+    const enriched_resource = {
+      ...resource_obj,
+      averageRating: avgRating,
+      feedback: feedback.map(toClient)
+    };
+
+    res.status(200).json(enriched_resource);
+
   } catch (error) {
     console.error(`Fehler beim Abrufen der Ressource mit ID ${req.params.id}:`, error);
     next(error);
