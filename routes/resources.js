@@ -69,17 +69,42 @@ const FEEDBACK_FILE  = 'feedback.json';
  */
 router.get('/', async (req, res, next) => {
   try {
+    // const resources = await readData(RESOURCES_FILE);
+    // const ratings   = await readData(RATINGS_FILE);
+
+    // const { type, authorId } = req.query;
+
+    // let filtered = resources;
+    // if (type)     filtered = filtered.filter(r => String(r.type) === String(type));
+    // if (authorId) filtered = filtered.filter(r => String(r.authorId) === String(authorId));
+
+    // // Anreichern NUR mit averageRating (KEIN feedback anhängen)
+    // const enriched = filtered.map(resource => {
+    //   const resourceId = String(resource.id);
+    //   const resourceRatings = ratings.filter(r => String(r.resourceId) === resourceId);
+    //   const avgRating = average(resourceRatings.map(r => r.ratingValue));
+
+    //   // explizit KEIN 'feedback' Feld zurückgeben
+    //   const { feedback, ...rest } = resource; // falls im Datensatz existiert, entfernen
+    //   return {
+    //     ...rest,
+    //     averageRating: avgRating
+    //   };
+    // });
+
+    // res.status(200).json(enriched);
+
     const resources = await Resource.find().lean();
-    
+
     const ratingAgg = await Rating.aggregate([
       { $group: { _id: "$resourceId", avg: { $avg: "$ratingValue" } } }
     ]);
 
     const avgMap = Object.fromEntries(
-      ratingAgg.map((r) => [String(r._id), Number(r.avg?.toFixed(2) ?? 0)])
+      ratingAgg.map((res) => [String(res._id), Number(res.avg?.toFixed(2) ?? 0)])
     );
 
-    const enriched = resources.map((resource) => {
+    const enriched = resources.map((resource_doc) => {
       const id = String(resource_doc._id);
       const resource_obj = toClient(resource_doc);
       return {
@@ -89,9 +114,9 @@ router.get('/', async (req, res, next) => {
     });
 
     res.status(200).json(enriched);
-
+    
   } catch (error) {
-    console.error('Fehler beim Abrufen der Ressourcen:', error);
+    console.error('Fehler beim Abrufen aller Ressourcen:', error);
     next(error);
   }
 });
@@ -137,7 +162,6 @@ router.get('/:id', async (req, res, next) => {
     }
 
     const enriched_resource = await buildEnrichedResource(resource);
-
     res.status(200).json(enriched_resource);
 
   } catch (error) {
@@ -165,7 +189,7 @@ router.post('/', validateResource, async (req, res, next) => {
   try {
     const newResource = {
       ...req.body,
-      createdAt: new Date().toISOString()
+      createdAt: new Date()
     };
     const created_resource = await Resource.create(newResource);
     res.status(201).json(toClient(created_resource.toObject()));
@@ -192,32 +216,28 @@ router.post('/', validateResource, async (req, res, next) => {
  * @returns {Object} 500 - Interner Serverfehler.
  */
 router.put('/:id', async (req, res, next) => {
-  try { 
+  try {
     const resourceId = req.params.id;
     const _id = toObjectId(resourceId);
     const newData = req.body;
 
     if (!newData || Object.keys(newData).length === 0) {
-    res.status(400).json({ error: 'Keine Daten zum Aktualisieren vorhanden.' });
-    return;
+      res.status(400).json({ error: 'Keine Daten zum Aktualisieren vorhanden.' });
+      return;
     }
 
-    // Ressource aktualisieren
     const updated_resource = await Resource.findByIdAndUpdate(
       _id,
       {...newData, updatedAt: new Date()},
       { new: true, lean: true }
     );
-
+    
     if (!updated_resource) {
-      res.status(404).json({ error: `Ressource mit ID ${req.params.id} nicht gefunden.` });
+      res.status(404).json({ error: `Ressource mit ID ${resourceId} nicht gefunden.` });
       return;
     }
 
-    // Ressource anreichern
     const enriched_resource = await buildEnrichedResource(updated_resource);
-
-    // Clientfreundliches Objekt zurückgeben
     res.status(200).json(enriched_resource);
 
   } catch (error) {
@@ -243,21 +263,19 @@ router.delete('/:id', async (req, res, next) => {
     const resourceId = req.params.id;
     const _id = toObjectId(resourceId);
 
-    // Ressource löschen
     const deleted_resource = await Resource.findByIdAndDelete(_id);
 
     if (!deleted_resource) {
-      res.status(404).json({ error: `Ressource mit ID ${req.params.id} nicht gefunden.` });
+      res.status(404).json({ error: `Ressource mit ID ${resourceId} nicht gefunden.` });
       return;
     }
-
+    
     await Promise.all([
       Rating.deleteMany({ resourceId: _id }),
       Feedback.deleteMany({ resourceId: _id })
     ]);
 
     res.status(204).end();
-
   } catch (error) {
     console.error(`Fehler beim Löschen der Ressource mit ID ${req.params.id}:`, error);
     next(error);
@@ -290,7 +308,7 @@ router.delete('/:id', async (req, res, next) => {
  */
 router.post('/:resourceId/ratings', validateRating, async (req, res, next) => {
   try {
-    
+
     const resourceId = req.params.resourceId;
     const _id = toObjectId(resourceId);
 
@@ -358,19 +376,17 @@ router.post('/:resourceId/feedback', validateFeedback, async (req, res, next) =>
       return;
     }
 
-  const newFeedback = {
-    resourceId: _id,
-    feedbackText: String(feedbackText).trim(),
-    userId: userId ? String(userId) : 'anonymous',
-    timestamp: new Date()
-  };
+    const newFeedback = {
+      resourceId: _id,
+      feedbackText: String(feedbackText).trim(),
+      userId: userId ? String(userId) : 'anonymous',
+      timestamp: new Date()
+    };
 
-  await Feedback.create(newFeedback);
+    await Feedback.create(newFeedback);
 
-  const enriched = await buildEnrichedResource(resource);
-    
-  res.status(201).json(enriched);
-
+    const enriched = await buildEnrichedResource(resource);
+    res.status(201).json(enriched);
   } catch (error) {
     console.error(`Fehler beim Hinzufügen von Feedback für Ressource ${req.params.resourceId}:`, error);
     next(error);
@@ -405,7 +421,7 @@ router.put('/:resourceId/feedback/:feedbackId', validateFeedback, async (req, re
       { new: true, lean: true }
     );
 
-    if (!updated_feedback) {
+    if (!updated_feedback){
       res.status(404).json({ error: `Feedback mit ID ${feedbackId} nicht gefunden.` });
       return;
     }
@@ -439,14 +455,14 @@ router.delete('/:resourceId/feedback/:feedbackId', async (req, res, next) => {
       { _id: feedbackId, resourceId }
     );
 
-    if (!deleted_feedback) {
+    if (!deleted_feedback){
       res.status(404).json({ error: `Feedback mit ID ${feedbackId} nicht gefunden.` });
       return;
     }
 
     res.status(204).end();
   } catch (error) {
-    console.error(`Fehler beim Löschen von Feedback ${feedbackId} für Ressource ${resourceId}:`, error);
+    console.error(`Fehler beim Löschen von Feedback ${req.params.feedbackId} für Ressource ${req.params.resourceId}:`, error);
     next(error);
   }
 });
