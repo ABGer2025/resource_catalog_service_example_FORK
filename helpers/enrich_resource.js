@@ -14,7 +14,7 @@ export async function buildEnrichedResource(resource) {
     { $group: { _id: _id, avg: { $avg: "$ratingValue" } } }
   ]);
 
-  const avgRating = avgDoc?.avg ?? 0;
+  const avgRating = avgDoc?.avg.toFixed(2) ?? 0;
 
   const feedback = await Feedback.find({ resourceId: _id }).lean();
 
